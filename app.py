@@ -22,22 +22,30 @@ if uploaded_file is not None:
     # Choose target column
     target = st.selectbox("Select target column", df.columns)
 
-    # Prepare features
+    # ===== Feature Engineering =====
     X = df.drop(columns=[target])
+
+    # Handle datetime columns
+    for col in X.columns:
+        if "date" in col.lower() or "time" in col.lower():
+            X[col] = pd.to_datetime(X[col], errors="coerce")
+            # Extract useful datetime parts
+            X[col + "_hour"] = X[col].dt.hour
+            X[col + "_day"] = X[col].dt.day
+            X[col + "_month"] = X[col].dt.month
+            X = X.drop(columns=[col])
+
+    # Keep only numeric features
     X = X.select_dtypes(include=[np.number]).fillna(0)
 
-    # Prepare target
+    # ===== Target =====
     y_raw = df[target]
-
-    # Try numeric conversion
     y_numeric = pd.to_numeric(y_raw, errors="coerce")
 
     if y_numeric.notnull().sum() > 0.8 * len(y_raw):
-        # Mostly numeric target → regression
         y = y_numeric.fillna(0)
         problem_type = "regression"
     else:
-        # Categorical target → classification
         y = y_raw.astype(str)
         problem_type = "classification"
 
@@ -59,7 +67,7 @@ if uploaded_file is not None:
             st.subheader("✅ Regression Results")
             st.write(f"R² Score: {r2_score(y_test, preds):.2f}")
 
-            # Plot
+            # Plot actual vs predicted
             fig, ax = plt.subplots()
             ax.scatter(y_test, preds, alpha=0.5)
             ax.set_xlabel("Actual")
@@ -74,14 +82,12 @@ if uploaded_file is not None:
 
             st.subheader("✅ Classification Results")
             st.write(f"Accuracy: {accuracy_score(y_test, preds):.2f}")
-
-            # Show prediction samples
             st.write("Sample Predictions:", list(zip(y_test[:10], preds[:10])))
 
         # 🔮 Try prediction on custom input
         st.subheader("🔮 Try Custom Prediction")
         sample_input = {}
-        for col in X.columns[:5]:  # limit to first 5 features for UI simplicity
+        for col in X.columns[:5]:  # limit UI to first 5 features
             val = st.number_input(
                 f"{col}",
                 float(X[col].min()),
