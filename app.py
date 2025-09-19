@@ -1,96 +1,70 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
-# -------------------------
-# 1. App Title
-# -------------------------
-st.title("🚦 Smart Traffic Prediction")
+st.title("🚦 Smart Traffic Insights")
 
-# -------------------------
-# 2. Upload Dataset
-# -------------------------
-uploaded_file = st.file_uploader("Upload your traffic dataset (CSV)", type=["csv"])
+# Upload CSV
+uploaded_file = st.file_uploader("Upload Traffic Dataset (CSV)", type="csv")
 
-if uploaded_file:
+if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    df['date_time'] = pd.to_datetime(df['date_time'])
-    df = df.sort_values('date_time').reset_index(drop=True)
-
-    st.subheader("📊 Data Preview")
+    st.subheader("📊 Dataset Preview")
     st.write(df.head())
 
-    # -------------------------
-    # 3. Feature Engineering
-    # -------------------------
-    df['hour'] = df['date_time'].dt.hour
-    df['weekday'] = df['date_time'].dt.weekday
-    df['is_weekend'] = df['weekday'].apply(lambda x: 1 if x >= 5 else 0)
-    df['month'] = df['date_time'].dt.month
-    df['rolling_volume'] = df.groupby('junction')['traffic_volume'].rolling(3, min_periods=1).mean().reset_index(0, drop=True)
+    # Show columns
+    st.write("Available columns:", df.columns.tolist())
 
-    features = ['junction', 'hour', 'weekday', 'is_weekend', 'month', 'rolling_volume']
+    # Select target column
+    if "traffic_volume" in df.columns:
+        target = "traffic_volume"
+    else:
+        target = st.selectbox("Select target column", df.columns)
 
-    # -------------------------
-    # 4. Train-Test Split
-    # -------------------------
-    split_idx = int(len(df) * 0.8)
-    train, test = df.iloc[:split_idx], df.iloc[split_idx:]
+    # Features = all except target
+    X = df.drop(columns=[target])
+    y = df[target]
 
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(train[features])
-    y_train = train['traffic_volume']
-    X_test = scaler.transform(test[features])
-    y_test = test['traffic_volume']
+    # Keep only numeric columns
+    X = X.select_dtypes(include=[np.number]).fillna(0)
+    y = y.fillna(0)
 
-    # -------------------------
-    # 5. Model Training
-    # -------------------------
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
+    if X.shape[1] == 0:
+        st.error("❌ No numeric features available for training!")
+    else:
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
 
-    st.subheader("📈 Model Performance")
-    st.write(f"**MSE:** {mean_squared_error(y_test, y_pred):.2f}")
-    st.write(f"**R2 Score:** {r2_score(y_test, y_pred):.2f}")
+        # Model
+        model = LinearRegression()
+        model.fit(X_train, y_train)
 
-    # Plot Actual vs Predicted
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(test['date_time'], y_test, label='Actual')
-    ax.plot(test['date_time'], y_pred, label='Predicted')
-    ax.set_title("Traffic Prediction vs Actual")
-    ax.legend()
-    st.pyplot(fig)
+        # Predictions
+        preds = model.predict(X_test)
 
-    # -------------------------
-    # 6. Inference
-    # -------------------------
-    st.subheader("🔮 Predict Traffic")
+        st.subheader("✅ Model Results")
+        st.write(f"R² Score: {model.score(X_test, y_test):.2f}")
 
-    time_input = st.text_input("Enter time (YYYY-MM-DD HH:MM:SS)", "2025-09-19 08:30:00")
-    junction_input = st.number_input("Enter Junction Number", min_value=int(df['junction'].min()), 
-                                     max_value=int(df['junction'].max()), value=int(df['junction'].min()))
+        # Plot actual vs predicted
+        fig, ax = plt.subplots()
+        ax.scatter(y_test, preds, alpha=0.5)
+        ax.set_xlabel("Actual Traffic Volume")
+        ax.set_ylabel("Predicted Traffic Volume")
+        ax.set_title("Actual vs Predicted")
+        st.pyplot(fig)
 
-    if st.button("Predict Traffic"):
-        dt = pd.to_datetime(time_input)
-        hour = dt.hour
-        weekday = dt.weekday()
-        is_weekend = 1 if weekday >= 5 else 0
-        month = dt.month
-        rolling_volume = df[df['junction'] == junction_input]['traffic_volume'].tail(3).mean()
+        # Predict on custom input
+        st.subheader("🔮 Try Prediction")
+        sample_input = {}
+        for col in X.columns[:5]:  # take first 5 features for simplicity
+            val = st.number_input(f"{col}", float(X[col].min()), float(X[col].max()), float(X[col].mean()))
+            sample_input[col] = val
 
-        input_features = np.array([[junction_input, hour, weekday, is_weekend, month, rolling_volume]])
-        input_scaled = scaler.transform(input_features)
-        pred_volume = model.predict(input_scaled)[0]
-
-        congestion_level = int(pd.qcut(df['traffic_volume'], 5, labels=[1, 2, 3, 4, 5]).iloc[-1])
-        peak_hour = df.groupby('hour')['traffic_volume'].mean().idxmax()
-
-        st.success(f"🚗 Predicted Traffic Volume: **{int(pred_volume)}** vehicles")
-        st.info(f"📊 Congestion Level (1-5): **{congestion_level}**")
-        st.warning(f"⏰ Peak Traffic Hour: **{peak_hour}:00**")
+        if st.button("Predict Traffic"):
+            input_df = pd.DataFrame([sample_input])
+            st.write("Predicted Traffic Volume:", int(model.predict(input_df)[0]))
