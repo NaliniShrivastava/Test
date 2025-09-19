@@ -1,102 +1,84 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.metrics import r2_score, accuracy_score
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-st.title("🚦 Smart Traffic Insights - Mini AI System")
+st.set_page_config(page_title="Smart Traffic Insights", layout="wide")
 
-# Upload CSV
-uploaded_file = st.file_uploader("Upload Traffic Dataset (CSV)", type="csv")
+st.title("🚦 Smart Traffic Insights for Indian Cities")
+st.markdown("Predict and analyze traffic patterns using Machine Learning.")
+
+# Upload dataset
+uploaded_file = st.file_uploader("Upload your traffic dataset (CSV)", type=["csv"])
 
 if uploaded_file is not None:
+    # Load data
     df = pd.read_csv(uploaded_file)
+
     st.subheader("📊 Dataset Preview")
     st.write(df.head())
 
-    # Show columns
-    st.write("Available columns:", df.columns.tolist())
+    # Convert datetime if present
+    if "date_time" in df.columns:
+        df["date_time"] = pd.to_datetime(df["date_time"], errors="coerce")
+        df["hour"] = df["date_time"].dt.hour
+        df["day"] = df["date_time"].dt.day
+        df["month"] = df["date_time"].dt.month
 
-    # Choose target column
-    target = st.selectbox("Select target column", df.columns)
+    # Select target & features
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    target = st.selectbox("Select Target Column (y)", options=numeric_cols)
+    features = st.multiselect(
+        "Select Feature Columns (X)", options=numeric_cols, default=[c for c in numeric_cols if c != target]
+    )
 
-    # ===== Feature Engineering =====
-    X = df.drop(columns=[target])
+    if len(features) > 0:
+        X = df[features]
+        y = df[target]
 
-    # Handle datetime columns
-    for col in X.columns:
-        if "date" in col.lower() or "time" in col.lower():
-            X[col] = pd.to_datetime(X[col], errors="coerce")
-            # Extract useful datetime parts
-            X[col + "_hour"] = X[col].dt.hour
-            X[col + "_day"] = X[col].dt.day
-            X[col + "_month"] = X[col].dt.month
-            X = X.drop(columns=[col])
-
-    # Keep only numeric features
-    X = X.select_dtypes(include=[np.number]).fillna(0)
-
-    # ===== Target =====
-    y_raw = df[target]
-    y_numeric = pd.to_numeric(y_raw, errors="coerce")
-
-    if y_numeric.notnull().sum() > 0.8 * len(y_raw):
-        y = y_numeric.fillna(0)
-        problem_type = "regression"
-    else:
-        y = y_raw.astype(str)
-        problem_type = "classification"
-
-    st.write(f"Detected Problem Type: **{problem_type}**")
-
-    if X.shape[1] == 0:
-        st.error("❌ No numeric features available for training!")
-    else:
         # Train-test split
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42
         )
 
-        if problem_type == "regression":
-            model = LinearRegression()
-            model.fit(X_train, y_train)
-            preds = model.predict(X_test)
+        # Train model
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
 
-            st.subheader("✅ Regression Results")
-            st.write(f"R² Score: {r2_score(y_test, preds):.2f}")
+        # Metrics
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
-            # Plot actual vs predicted
-            fig, ax = plt.subplots()
-            ax.scatter(y_test, preds, alpha=0.5)
-            ax.set_xlabel("Actual")
-            ax.set_ylabel("Predicted")
-            ax.set_title("Actual vs Predicted")
-            st.pyplot(fig)
+        st.subheader("📈 Model Performance")
+        st.write(f"**Mean Absolute Error (MAE):** {mae:.2f}")
+        st.write(f"**Root Mean Squared Error (RMSE):** {rmse:.2f}")
 
-        else:  # classification
-            model = LogisticRegression(max_iter=1000)
-            model.fit(X_train, y_train)
-            preds = model.predict(X_test)
+        # Plot Actual vs Predicted
+        st.subheader("🔍 Prediction Visualization")
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.scatter(y_test, y_pred, alpha=0.5, color="blue")
+        ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], "r--")
+        ax.set_xlabel("Actual")
+        ax.set_ylabel("Predicted")
+        ax.set_title("Actual vs Predicted Traffic")
+        st.pyplot(fig)
 
-            st.subheader("✅ Classification Results")
-            st.write(f"Accuracy: {accuracy_score(y_test, preds):.2f}")
-            st.write("Sample Predictions:", list(zip(y_test[:10], preds[:10])))
-
-        # 🔮 Try prediction on custom input
-        st.subheader("🔮 Try Custom Prediction")
-        sample_input = {}
-        for col in X.columns[:5]:  # limit UI to first 5 features
-            val = st.number_input(
-                f"{col}",
-                float(X[col].min()),
-                float(X[col].max()),
-                float(X[col].mean())
-            )
-            sample_input[col] = val
+        # Prediction form
+        st.subheader("🛠 Try a Custom Prediction")
+        input_data = {}
+        for col in features:
+            val = st.number_input(f"Enter value for {col}", float(X[col].min()), float(X[col].max()), float(X[col].mean()))
+            input_data[col] = val
 
         if st.button("Predict Traffic"):
-            input_df = pd.DataFrame([sample_input])
-            result = model.predict(input_df)[0]
-            st.success(f"Predicted Value: {result}")
+            input_df = pd.DataFrame([input_data])
+            pred = model.predict(input_df)[0]
+            st.success(f"Predicted Traffic ({target}): {pred:.2f}")
+
+else:
+    st.info("👆 Please upload a CSV file to get started.")
